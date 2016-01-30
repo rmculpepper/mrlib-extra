@@ -1,67 +1,135 @@
 #lang racket/base
 (require racket/class
          racket/match
-         racket/gui/base
-         )
+         racket/gui/base)
 (provide (all-defined-out))
 
 (define TARGET-W 4)
 (define TARGET-H 4)
 
-(define resize-cursor (make-object cursor% 'size-nw/se))
-(define grabbed-cursor resize-cursor)
+(define resize-wh-cursor (make-object cursor% 'size-nw/se))
+(define resize-w-cursor (make-object cursor% 'size-e/w))
+(define resize-h-cursor (make-object cursor% 'size-n/s))
+
+;; A DragState is (list DragSym Real Real)
+;; A DragSym is one of 'w, 'h, 'wh
+;; where 'w means adjust width only, etc
 
 ;; resizable-editor-snip%
 (define resizable-editor-snip%
   (class* editor-snip% ()
-    (inherit get-flags set-flags)
+    (inherit get-flags set-flags set-inset set-margin)
     (super-new)
     (set-flags (append '(handles-events handles-all-mouse-events) (get-flags)))
 
-    ;; dragging : #f or (cons Real Real)
+    ;; dragging : #f or DragState
     (define dragging #f)
 
-    (define/private (get-lower-right-position [xadj 0] [yadj 0])
+    (define/private (get-lower-right-position)
       (define owner (send (send this get-admin) get-editor))
       (define xb (box 0))
       (define yb (box 0))
       (send owner get-snip-location this xb yb #t)
-      (values (- (unbox xb) xadj) (- (unbox yb) yadj)))
+      (values (unbox xb) (unbox yb)))
 
     ;; the snip's top-left corner is at (x, y) wrt the enclosing area (canvas)
     ;; the snip's top-left corner is at (edx, edy) wrt the enclosing editor
     ;; the mouse is currently at (mx, my)
 
+    (define MAGIC-X 6)
+    (define MAGIC-Y 5)
+
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (super draw dc x y left top right bottom dx dy draw-caret)
-      (when dragging
-        (define saved-region (send dc get-clipping-region))
-        (define saved-brush (send dc get-brush))
-        (define saved-pen (send dc get-pen))
-        (define-values (x2 y2) (values (car dragging) (cdr dragging)))
-        (send dc set-clipping-region #f)
-        (send dc set-brush "black" 'transparent)
-        (send dc set-pen "gray" 2 'dot)
-        (send dc draw-rectangle x y (- x2 x) (- y2 y))
-        (send dc set-clipping-region saved-region)))
+      (match dragging
+        [(list drag-sym x2 y2)
+         (define effw (+ MAGIC-X (- x2 x)))
+         (define effh (+ MAGIC-Y (- y2 y)))
+         (when (and (> effw 0) (> effh 0))
+           (call/save-dc-state dc
+             (lambda ()
+               (send dc set-clipping-region #f)
+               (send dc set-brush "black" 'transparent)
+               (send dc set-pen "red" 1 'dot)
+               (send dc draw-rectangle x y effw effh))))]
+        [#f (void)]))
 
     (define/override (adjust-cursor dc x y edx edy event)
       (define (call-super) (super adjust-cursor dc x y edx edy event))
       (define mx (send event get-x))
       (define my (send event get-y))
-      (define-values (x2 y2) (get-lower-right-position 0 0))
-      (cond [(and dragging (send event dragging?))
-             grabbed-cursor]
-            [(and (<= (max x (- x2 TARGET-W)) mx x2)
-                  (<= (max y (- y2 TARGET-H)) my y2))
-             resize-cursor]
-            [else (call-super)]))
+      (define-values (x2 y2) (get-lower-right-position))
+      (match dragging
+        [(list 'w _ _) resize-w-cursor]
+        [(list 'h _ _) resize-h-cursor]
+        [(list 'wh _ _) resize-wh-cursor]
+        [#f 
+         (define-values (drag-w? drag-h?) (get-drag-w/h? x y x2 y2 mx my))
+         (cond [(and drag-w? drag-h?) resize-wh-cursor]
+               [drag-w? resize-w-cursor]
+               [drag-h? resize-h-cursor]
+               [else (call-super)])]))
 
     (define/override (on-event dc x y edx edy event)
       (define (call-super) (super on-event dc x y edx edy event))
+      (define-values (mx my) (values (send event get-x) (send event get-y)))
+      (define-values (x2 y2) (get-lower-right-position))
+      (debug-mouse-event dc x y edx edy event)
+      (define event-type (send event get-event-type))
+      (when (eq? event-type 'motion)
+        (dragging:update mx my))
+      (when (eq? event-type 'leave)
+        (set! dragging #f))
+      (cond [(eq? event-type 'left-down)
+             (define-values (drag-w? drag-h?) (get-drag-w/h? x y x2 y2 mx my))
+             (cond [(and drag-w? drag-h?)
+                    (set! dragging (list 'wh mx my))]
+                   [drag-w?
+                    (set! dragging (list 'w mx y2))]
+                   [drag-h?
+                    (set! dragging (list 'h x2 my))]
+                   [else (call-super)])]
+            [(and dragging (eq? event-type 'left-up))
+             (dragging:resize x y dragging)
+             (set! dragging #f)]
+            [else (call-super)]))
+
+    (define/public (dragging:resize x y dragging)
+      (match dragging
+        [(list _ nx ny)
+         ;; FIXME: Border throws calculation off ...
+         (send this resize (+ MAGIC-X (- nx x)) (+ MAGIC-Y (- ny y)))
+         ;; FIXME: Updating whole display is antisocial ...
+         (send (send (send this get-admin) get-editor) invalidate-bitmap-cache
+               0 0 'display-end 'display-end)]
+        [#f (void)]))
+
+    (define/public (get-drag-w/h? x y x2 y2 mx my)
+      (define drag-w? (<= (max x (- x2 TARGET-W)) mx x2))
+      (define drag-h? (<= (max y (- y2 TARGET-H)) my y2))
+      (values drag-w? drag-h?))
+
+    (define/public (dragging:update mx my)
+      (when dragging
+        (set! dragging (dragging:update-state dragging mx my))
+        ;; FIXME: Updating whole display is antisocial ...
+        (send (send (send this get-admin) get-editor) invalidate-bitmap-cache
+              0 0 'display-end 'display-end)))
+
+    (define/public (dragging:update-state dragging mx my)
+      (match dragging
+        [(list 'w  _  y2)
+         (list 'w  mx y2)]
+        [(list 'h  x2 _ )
+         (list 'h  x2 my)]
+        [(list 'wh _  _ )
+         (list 'wh mx my)]
+        [#f #f]))
+
+    (define/private (debug-mouse-event dc x y edx edy event)
       (define mx (send event get-x))
       (define my (send event get-y))
-      (define-values (x2 y2) (get-lower-right-position 0 0))
+      (define-values (x2 y2) (get-lower-right-position))
       (eprintf "event; ed: ~s,~s type: ~s ~a\n" edx edy
                (send event get-event-type)
                (if (send event dragging?) "dragging" ""))
@@ -70,27 +138,7 @@
                x y x2 y2)
       (eprintf "  size min ~s,~s max ~s,~s\n"
                (send this get-min-width) (send this get-min-height)
-               (send this get-max-width) (send this get-max-height))
-      (cond [(and (eq? (send event get-event-type) 'left-down)
-                  (<= (max x (- x2 TARGET-W)) mx x2)
-                  (<= (max y (- y2 TARGET-H)) my y2))
-             (eprintf "start drag\n")
-             (set! dragging (cons mx my))
-             #;(call-super)]
-            [(eq? (send event get-event-type) 'leave)
-             (set! dragging #f)
-             #;(call-super)]
-            [(and dragging (eq? (send event get-event-type) 'motion))
-             (set! dragging (cons mx my))
-             (send (send (send this get-admin) get-editor) invalidate-bitmap-cache
-                   0 0 'display-end 'display-end)
-             (call-super)]
-            [(and dragging (eq? (send event get-event-type) 'left-up))
-             (eprintf "end drag\n")
-             (set! dragging #f)
-             (send this resize (- mx x) (- my y))
-             (void)]
-            [else (call-super)]))
+               (send this get-max-width) (send this get-max-height)))
     ))
 
 ;; ;; clicky-snip%
@@ -162,6 +210,15 @@
 (define (hide-icon)
   (make-object image-snip%
     (collection-file-path "turn-down.png" "icons")))
+
+(define (call/save-dc-state dc proc)
+  (define saved-region (send dc get-clipping-region))
+  (define saved-brush (send dc get-brush))
+  (define saved-pen (send dc get-pen))
+  (begin0 (proc)
+    (send dc set-clipping-region saved-region)
+    (send dc set-brush saved-brush)
+    (send dc set-pen saved-pen)))
 
 (define-syntax-rule (style-delta [command arg ...] ...)
   (let ([sd (make-object style-delta%)])
