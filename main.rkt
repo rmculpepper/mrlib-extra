@@ -18,47 +18,53 @@
 ;; resizable-editor-snip%
 (define resizable-editor-snip%
   (class* editor-snip% ()
-    (inherit get-flags set-flags set-inset set-margin)
+    (inherit get-extent get-editor resize get-flags set-flags)
     (super-new)
     (set-flags (append '(handles-events handles-all-mouse-events) (get-flags)))
 
     ;; dragging : #f or DragState
     (define dragging #f)
 
-    (define/private (get-lower-right-position)
+    (define/private (get-lower-right-position/old dc x y)
       (define owner (send (send this get-admin) get-editor))
       (define xb (box 0))
       (define yb (box 0))
       (send owner get-snip-location this xb yb #t)
       (values (unbox xb) (unbox yb)))
 
+    (define/private (get-lower-right-position dc x y)
+      (define wb (box 0))
+      (define hb (box 0))
+      (get-extent dc x y wb hb)
+      (values (+ x (unbox wb)) (+ y (unbox hb))))
+
     ;; the snip's top-left corner is at (x, y) wrt the enclosing area (canvas)
     ;; the snip's top-left corner is at (edx, edy) wrt the enclosing editor
     ;; the mouse is currently at (mx, my)
 
-    (define MAGIC-X 6)
-    (define MAGIC-Y 5)
+    (define MAGIC-X 0 #;6)
+    (define MAGIC-Y 0 #;5)
 
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (super draw dc x y left top right bottom dx dy draw-caret)
       (match dragging
         [(list drag-sym x2 y2)
-         (define effw (+ MAGIC-X (- x2 x)))
-         (define effh (+ MAGIC-Y (- y2 y)))
-         (when (and (> effw 0) (> effh 0))
+         (define w (- x2 x))
+         (define h (- y2 y))
+         (when (and (> w 0) (> h 0))
            (call/save-dc-state dc
              (lambda ()
                (send dc set-clipping-region #f)
                (send dc set-brush "black" 'transparent)
                (send dc set-pen "red" 1 'dot)
-               (send dc draw-rectangle x y effw effh))))]
+               (send dc draw-rectangle x y w h))))]
         [#f (void)]))
 
     (define/override (adjust-cursor dc x y edx edy event)
       (define (call-super) (super adjust-cursor dc x y edx edy event))
       (define mx (send event get-x))
       (define my (send event get-y))
-      (define-values (x2 y2) (get-lower-right-position))
+      (define-values (x2 y2) (get-lower-right-position dc x y))
       (match dragging
         [(list 'w _ _) resize-w-cursor]
         [(list 'h _ _) resize-h-cursor]
@@ -73,7 +79,7 @@
     (define/override (on-event dc x y edx edy event)
       (define (call-super) (super on-event dc x y edx edy event))
       (define-values (mx my) (values (send event get-x) (send event get-y)))
-      (define-values (x2 y2) (get-lower-right-position))
+      (define-values (x2 y2) (get-lower-right-position dc x y))
       (debug-mouse-event dc x y edx edy event)
       (define event-type (send event get-event-type))
       (when (eq? event-type 'motion)
@@ -97,8 +103,13 @@
     (define/public (dragging:resize x y dragging)
       (match dragging
         [(list _ nx ny)
-         ;; FIXME: Border throws calculation off ...
-         (send this resize (+ MAGIC-X (- nx x)) (+ MAGIC-Y (- ny y)))
+         (define w (- nx x))
+         (define h (- ny y))
+         (resize w h)
+         ;; Re-adjust the editor's width because resize doesn't un-off-by-1
+         (send* (get-editor)
+           [set-min-width (+ 1 w)]
+           [set-max-width (+ 1 w)])
          ;; FIXME: Updating whole display is antisocial ...
          (send (send (send this get-admin) get-editor) invalidate-bitmap-cache
                0 0 'display-end 'display-end)]
@@ -127,18 +138,19 @@
         [#f #f]))
 
     (define/private (debug-mouse-event dc x y edx edy event)
-      (define mx (send event get-x))
-      (define my (send event get-y))
-      (define-values (x2 y2) (get-lower-right-position))
-      (eprintf "event; ed: ~s,~s type: ~s ~a\n" edx edy
-               (send event get-event-type)
-               (if (send event dragging?) "dragging" ""))
-      (eprintf "  mouse at ~s,~s\n" mx my)
-      (eprintf "  snip top-left ~s,~s bottom-right ~s,~s\n"
-               x y x2 y2)
-      (eprintf "  size min ~s,~s max ~s,~s\n"
-               (send this get-min-width) (send this get-min-height)
-               (send this get-max-width) (send this get-max-height)))
+      (unless (eq? (send event get-event-type) 'motion)
+        (define mx (send event get-x))
+        (define my (send event get-y))
+        (define-values (x2 y2) (get-lower-right-position dc x y))
+        (eprintf "event; ed: ~s,~s type: ~s ~a\n" edx edy
+                 (send event get-event-type)
+                 (if (send event dragging?) "dragging" ""))
+        (eprintf "  mouse at ~s,~s\n" mx my)
+        (eprintf "  snip top-left ~s,~s bottom-right ~s,~s\n"
+                 x y x2 y2)
+        (eprintf "  size min ~s,~s max ~s,~s\n"
+                 (send this get-min-width) (send this get-min-height)
+                 (send this get-max-width) (send this get-max-height))))
     ))
 
 ;; ;; clicky-snip%
