@@ -7,36 +7,72 @@
 (define TARGET-W 4)
 (define TARGET-H 4)
 
-(define resize-wh-cursor (make-object cursor% 'size-nw/se))
-(define resize-w-cursor (make-object cursor% 'size-e/w))
-(define resize-h-cursor (make-object cursor% 'size-n/s))
+(define resize-n-cursor (make-object cursor% 'size-n/s))
+(define resize-e-cursor (make-object cursor% 'size-e/w))
+(define resize-nw-cursor (make-object cursor% 'size-nw/se))
+(define resize-ne-cursor (make-object cursor% 'size-ne/sw))
 
 ;; A DragState is (list DragSym Real Real)
 ;; A DragSym is one of 'w, 'h, 'wh
 ;; where 'w means adjust width only, etc
 
+(define drag-state%
+  (class object%
+    (init-field type x1 y1 x2 y2)
+    (define minx x1)
+    (define miny y1)
+    (define maxx x2)
+    (define maxy y2)
+    (super-new)
+
+    (define/public (call proc)
+      (proc x1 y1 x2 y2))
+
+    (define/public (update mx my)
+      (case type
+        [(w nw sw) (set! x1 mx) (set! minx (min minx mx))]
+        [(e ne se) (set! x2 mx) (set! maxx (max maxx mx))])
+      (case type
+        [(n nw ne) (set! y1 my) (set! miny (min miny my))]
+        [(s sw se) (set! y2 my) (set! maxy (max maxy my))]))
+
+    (define/public (draw-box dc)
+      (define w (- x2 x1))
+      (define h (- y2 y1))
+      (when (and (> w 0) (> h 0))
+        (call/save-dc-state dc
+          (lambda ()
+            (send dc set-clipping-region #f)
+            (send dc set-brush "black" 'transparent)
+            (send dc set-pen "red" 1 'dot)
+            (send dc draw-rectangle x1 y1 w h)))))
+
+    (define/public (refresh editor)
+      ;; This doesn't quite work: leaves artifacts along edges
+      ;; (let ([minx (max (- minx 2) 0)] [miny (max (- miny 2) 0)]
+      ;;       [maxx (+ maxx 2)] [maxy (+ maxy 2)])
+      ;;   (send editor invalidate-bitmap-cache minx miny maxx maxy))
+      (send editor invalidate-bitmap-cache 0 0 'display-end 'display-end))
+
+    (define/public (get-cursor)
+      (case type
+        [(n s) resize-n-cursor]
+        [(e w) resize-e-cursor]
+        [(ne sw) resize-ne-cursor]
+        [(nw se) resize-nw-cursor]
+        [else (error 'get-cursor "bad type: ~e" type)]))
+    ))
+
 ;; resizable-editor-snip%
 (define resizable-editor-snip%
   (class* editor-snip% ()
-    (inherit get-extent get-editor get-margin resize get-flags set-flags)
+    (inherit get-extent get-editor get-margin get-admin
+             resize get-flags set-flags)
     (super-new)
     (set-flags (append '(handles-events handles-all-mouse-events) (get-flags)))
 
     ;; dragging : #f or DragState
     (define dragging #f)
-
-    (define/private (get-lower-right-position/old dc x y)
-      (define owner (send (send this get-admin) get-editor))
-      (define xb (box 0))
-      (define yb (box 0))
-      (send owner get-snip-location this xb yb #t)
-      (values (unbox xb) (unbox yb)))
-
-    (define/private (get-lower-right-position dc x y)
-      (define wb (box 0))
-      (define hb (box 0))
-      (get-extent dc x y wb hb)
-      (values (+ x (unbox wb)) (+ y (unbox hb))))
 
     ;; the snip's top-left corner is at (x, y) wrt the enclosing area (canvas)
     ;; the snip's top-left corner is at (edx, edy) wrt the enclosing editor
@@ -44,33 +80,20 @@
 
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (super draw dc x y left top right bottom dx dy draw-caret)
-      (match dragging
-        [(list drag-sym x2 y2)
-         (define w (- x2 x))
-         (define h (- y2 y))
-         (when (and (> w 0) (> h 0))
-           (call/save-dc-state dc
-             (lambda ()
-               (send dc set-clipping-region #f)
-               (send dc set-brush "black" 'transparent)
-               (send dc set-pen "red" 1 'dot)
-               (send dc draw-rectangle x y w h))))]
-        [#f (void)]))
+      (when dragging (send dragging draw-box dc)))
 
     (define/override (adjust-cursor dc x y edx edy event)
       (define (call-super) (super adjust-cursor dc x y edx edy event))
       (define mx (send event get-x))
       (define my (send event get-y))
       (define-values (x2 y2) (get-lower-right-position dc x y))
-      (match dragging
-        [(list 'w _ _) resize-w-cursor]
-        [(list 'h _ _) resize-h-cursor]
-        [(list 'wh _ _) resize-wh-cursor]
-        [#f 
-         (define-values (drag-w? drag-h?) (get-drag-w/h? x y x2 y2 mx my))
-         (cond [(and drag-w? drag-h?) resize-wh-cursor]
-               [drag-w? resize-w-cursor]
-               [drag-h? resize-h-cursor]
+      (cond [dragging (send dragging get-cursor)]
+            [else
+             (case (get-edge/corner x y x2 y2 mx my)
+               [(nw se) resize-nw-cursor]
+               [(ne sw) resize-ne-cursor]
+               [(n s) resize-n-cursor]
+               [(e w) resize-e-cursor]
                [else (call-super)])]))
 
     (define/override (on-event dc x y edx edy event)
@@ -79,47 +102,50 @@
       (define-values (x2 y2) (get-lower-right-position dc x y))
       (debug-mouse-event dc x y edx edy event)
       (define event-type (send event get-event-type))
-      (when (eq? event-type 'motion)
-        (dragging:update mx my))
+      (when (and dragging (eq? event-type 'motion))
+        (send dragging update mx my)
+        (send dragging refresh (get-owner-editor)))
       (when (eq? event-type 'leave)
         (set! dragging #f))
       (cond [(eq? event-type 'left-down)
-             (define-values (drag-w? drag-h?) (get-drag-w/h? x y x2 y2 mx my))
-             (cond [(and drag-w? drag-h?)
-                    (set! dragging (list 'wh mx my))]
-                   [drag-w?
-                    (set! dragging (list 'w mx y2))]
-                   [drag-h?
-                    (set! dragging (list 'h x2 my))]
+             (cond [(get-edge/corner x y x2 y2 mx my)
+                    => (lambda (where)
+                         (define d
+                           (new drag-state% (type where) (x1 x) (y1 y) (x2 x2) (y2 y2)))
+                         (send d update mx my)
+                         (set! dragging d))]
                    [else (call-super)])]
             [(and dragging (eq? event-type 'left-up))
-             (dragging:resize x y dragging)
-             (set! dragging #f)]
+             (let ([d dragging])
+               (set! dragging #f)
+               (send d call (lambda (x1 y1 x2 y2) (do-resize d x1 y1 x2 y2))))]
             [else (call-super)]))
 
-    (define/public (dragging:resize x y dragging)
-      (match dragging
-        [(list _ nx ny)
-         (define w (- nx x))
-         (define h (- ny y))
-         (resize w h)
-         ;; Re-adjust the editor's width because resize doesn't un-off-by-1
-         (define-values (lm tm rm bm) (get-margin*))
-         (send* (get-editor)
-           [set-min-width (- w lm rm -1)]
-           [set-max-width (- w lm rm -1)])
-         ;; FIXME: indicate whether editor is completely displayed
-         (unless (editor-is-completely-displayed? (- w lm rm -1) (- h tm bm))
-           (eprintf "editor is not completely displayed\n"))
-         ;; FIXME: Updating whole display is antisocial ...
-         (send (send (send this get-admin) get-editor) invalidate-bitmap-cache
-               0 0 'display-end 'display-end)]
-        [#f (void)]))
+    (define/private (do-resize dragging x1 y1 x2 y2)
+      (define w (- x2 x1))
+      (define h (- y2 y1))
+      (resize w h)
+      ;; Re-adjust the editor's width because resize doesn't un-off-by-1
+      (define-values (lm tm rm bm) (get-margin*))
+      (send* (get-editor)
+        [set-min-width (- w lm rm -1)]
+        [set-max-width (- w lm rm -1)])
+      ;; FIXME: indicate whether editor is completely displayed
+      (unless (editor-is-completely-displayed? (- w lm rm -1) (- h tm bm))
+        (eprintf "editor is not completely displayed\n"))
+      ;; FIXME: Updating whole display is antisocial ...
+      (send dragging refresh (get-owner-editor)))
 
-    (define/public (get-margin*)
-      (define lb (box 0)) (define tb (box 0)) (define rb (box 0)) (define bb (box 0))
-      (get-margin lb tb rb bb)
-      (values (unbox lb) (unbox tb) (unbox rb) (unbox bb)))
+    (define/public (get-edge/corner x1 y1 x2 y2 mx my)
+      (define on-e? (<= (max x1 (- x2 TARGET-W)) mx x2))
+      (define on-s? (<= (max y1 (- y2 TARGET-H)) my y2))
+      (define on-w? (<= x1 mx (min (+ x1 TARGET-W) x2)))
+      (define on-n? (<= y1 my (min (+ y1 TARGET-H) y2)))
+      (cond [on-e? (cond [on-s? 'se] [on-n? 'ne] [else 'e])]
+            [on-w? (cond [on-s? 'sw] [on-n? 'nw] [else 'w])]
+            [on-n? 'n]
+            [on-s? 's]
+            [else #f]))
 
     (define/public (editor-is-completely-displayed? w h)
       (define editor (get-editor))
@@ -132,27 +158,20 @@
       (define complete? (and (<= (unbox xb) w) (<= (unbox yb) h)))
       complete?)
 
-    (define/public (get-drag-w/h? x y x2 y2 mx my)
-      (define drag-w? (<= (max x (- x2 TARGET-W)) mx x2))
-      (define drag-h? (<= (max y (- y2 TARGET-H)) my y2))
-      (values drag-w? drag-h?))
+    (define/public (get-margin*)
+      (define lb (box 0)) (define tb (box 0)) (define rb (box 0)) (define bb (box 0))
+      (get-margin lb tb rb bb)
+      (values (unbox lb) (unbox tb) (unbox rb) (unbox bb)))
 
-    (define/public (dragging:update mx my)
-      (when dragging
-        (set! dragging (dragging:update-state dragging mx my))
-        ;; FIXME: Updating whole display is antisocial ...
-        (send (send (send this get-admin) get-editor) invalidate-bitmap-cache
-              0 0 'display-end 'display-end)))
+    (define/private (get-owner-editor)
+      (define admin (get-admin))
+      (and admin (send admin get-editor)))
 
-    (define/public (dragging:update-state dragging mx my)
-      (match dragging
-        [(list 'w  _  y2)
-         (list 'w  mx y2)]
-        [(list 'h  x2 _ )
-         (list 'h  x2 my)]
-        [(list 'wh _  _ )
-         (list 'wh mx my)]
-        [#f #f]))
+    (define/private (get-lower-right-position dc x y)
+      (define wb (box 0))
+      (define hb (box 0))
+      (get-extent dc x y wb hb)
+      (values (+ x (unbox wb)) (+ y (unbox hb))))
 
     (define/private (debug-mouse-event dc x y edx edy event)
       (unless (eq? (send event get-event-type) 'motion)
