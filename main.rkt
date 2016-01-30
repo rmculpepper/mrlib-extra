@@ -66,6 +66,7 @@
 ;; resizable-editor-snip%
 (define resizable-editor-snip%
   (class* editor-snip% ()
+    (init-field [drag-handles '(s e se)])
     (inherit get-extent get-editor get-margin get-admin
              resize get-flags set-flags)
     (super-new)
@@ -100,7 +101,7 @@
       (define (call-super) (super on-event dc x y edx edy event))
       (define-values (mx my) (values (send event get-x) (send event get-y)))
       (define-values (x2 y2) (get-lower-right-position dc x y))
-      (debug-mouse-event dc x y edx edy event)
+      (when #f (debug-mouse-event dc x y edx edy event))
       (define event-type (send event get-event-type))
       (when (and dragging (eq? event-type 'motion))
         (send dragging update mx my)
@@ -133,19 +134,23 @@
       ;; FIXME: indicate whether editor is completely displayed
       (unless (editor-is-completely-displayed? (- w lm rm -1) (- h tm bm))
         (eprintf "editor is not completely displayed\n"))
-      ;; FIXME: Updating whole display is antisocial ...
       (send dragging refresh (get-owner-editor)))
 
     (define/public (get-edge/corner x1 y1 x2 y2 mx my)
+      (for/first ([where (in-list (get-edge/corner* x1 y1 x2 y2 mx my))]
+                  #:when (memq where drag-handles))
+        where))
+
+    (define/public (get-edge/corner* x1 y1 x2 y2 mx my)
       (define on-e? (<= (max x1 (- x2 TARGET-W)) mx x2))
       (define on-s? (<= (max y1 (- y2 TARGET-H)) my y2))
       (define on-w? (<= x1 mx (min (+ x1 TARGET-W) x2)))
       (define on-n? (<= y1 my (min (+ y1 TARGET-H) y2)))
-      (cond [on-e? (cond [on-s? 'se] [on-n? 'ne] [else 'e])]
-            [on-w? (cond [on-s? 'sw] [on-n? 'nw] [else 'w])]
-            [on-n? 'n]
-            [on-s? 's]
-            [else #f]))
+      (cond [on-e? (cond [on-s? '(se s e)] [on-n? '(ne n e)] [else '(e)])]
+            [on-w? (cond [on-s? '(sw s w)] [on-n? '(nw n w)] [else '(w)])]
+            [on-n? '(n)]
+            [on-s? '(s)]
+            [else '()]))
 
     (define/public (editor-is-completely-displayed? w h)
       (define editor (get-editor))
@@ -153,8 +158,6 @@
       (define xb (box 0))
       (define yb (box 0))
       (send editor position-location last-pos xb yb #f)
-      (eprintf "editor interior: ~s x ~s; last position at ~s, ~s\n"
-               w h (unbox xb) (unbox yb))
       (define complete? (and (<= (unbox xb) w) (<= (unbox yb) h)))
       complete?)
 
