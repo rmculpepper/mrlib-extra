@@ -33,7 +33,7 @@
         [(n nw ne) (set! y1 my) (set! miny (min miny my))]
         [(s sw se) (set! y2 my) (set! maxy (max maxy my))]))
 
-    (define/public (draw-box dc)
+    (define/public (draw-box dc color)
       (define w (- x2 x1))
       (define h (- y2 y1))
       (when (and (> w 0) (> h 0))
@@ -41,7 +41,7 @@
           (lambda ()
             (send dc set-clipping-region #f)
             (send dc set-brush "black" 'transparent)
-            (send dc set-pen "red" 1 'dot)
+            (send dc set-pen color 1 'dot)
             (send dc draw-rectangle x1 y1 w h)))))
 
     (define/public (refresh editor)
@@ -64,7 +64,8 @@
 ;; resizable-editor-snip-mixin
 (define (resizable-editor-snip-mixin %)
   (class %
-    (init-field [resize-handles '(s e se)])
+    (init-field [resize-handles '(s e se)]
+                [resize-box-color (get-highlight-background-color)])
     (inherit get-extent get-editor get-margin get-admin
              resize get-flags set-flags)
     (super-new)
@@ -73,13 +74,9 @@
     ;; dragging : #f or DragState
     (define dragging #f)
 
-    ;; the snip's top-left corner is at (x, y) wrt the enclosing area (canvas)
-    ;; the snip's top-left corner is at (edx, edy) wrt the enclosing editor
-    ;; the mouse is currently at (mx, my)
-
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (super draw dc x y left top right bottom dx dy draw-caret)
-      (when dragging (send dragging draw-box dc)))
+      (when dragging (send dragging draw-box dc resize-box-color)))
 
     (define/override (adjust-cursor dc x y edx edy event)
       (define (call-super) (super adjust-cursor dc x y edx edy event))
