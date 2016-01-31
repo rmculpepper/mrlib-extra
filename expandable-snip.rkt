@@ -90,29 +90,35 @@
 
 ;; ============================================================
 
-(define f (new frame% (label "test") (height 400) (width 600)))
-(define t (new text%))
-(define ec (new editor-canvas% (editor t) (parent f)))
-(send f show #t)
+(module+ main
+  (require "border-snip.rkt")
+  (provide (all-defined-out))
 
-(send t insert "Here's what's I'm talking about,\na nice clicky snip: ")
+  (define f (new frame% (label "test") (height 400) (width 600)))
+  (define t (new text%))
+  (define ec (new editor-canvas% (editor t) (parent f)))
+  (send f show #t)
 
-(require "resizable-snip.rkt")
-(define clicky-snip% (resizable-editor-snip-mixin expandable-snip%))
+  (send t insert "Here's what's I'm talking about,\na nice clicky snip: ")
 
-(define es (new clicky-snip% (with-border? #t) (layout 'replace)))
-;(send es set-margin 0 0 0 0)
+  (require "resizable-snip.rkt")
+  (define clicky-snip%
+    (oxford-brackets-border-snip-mixin
+     (resizable-editor-snip-mixin expandable-snip%)))
 
-(send* (send es get-closed-editor)
-  [insert "alphabet"]
-  ;; [hide-caret #t]
-  [lock #t])
+  (define es (new clicky-snip% #;(with-border? #t) (layout 'replace)))
+  ;;(send es set-margin 0 0 0 0)
 
-(send* (send es get-open-editor)
-  [insert "abcdefg\nhijklmno\npqrstuv\nwxyz"]
-  ;; [hide-caret #t]
-  [lock #t])
+  (send* (send es get-closed-editor)
+    [insert "alphabet"]
+    ;; [hide-caret #t]
+    [lock #t])
 
-(send t insert es)
-(send t hide-caret #t)
-(send t lock #t)
+  (send* (send es get-open-editor)
+    [insert "abcdefg\nhijklmno\npqrstuv\nwxyz"]
+    ;; [hide-caret #t]
+    [lock #t])
+
+  (send t insert es)
+  (send t hide-caret #t)
+  (send t lock #t))

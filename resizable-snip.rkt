@@ -242,6 +242,7 @@
 ;; ============================================================
 
 (module+ main
+  (require "border-snip.rkt")
   (provide (all-defined-out))
   (define f (new frame% (label "test") (height 400) (width 600)))
   (define t (new text%))
@@ -251,7 +252,8 @@
   (send t insert "Here's what's I'm talking about:\n")
 
   (define t2 (new text%))
-  (define es (new resizable-editor-snip% (editor t2) (with-border? #t)))
+  (define es (new (oxford-brackets-border-snip-mixin resizable-editor-snip%)
+                  (editor t2)))
   (send t2 insert "abcdefg hijklmno pqrstuv wxyz")
   (send t insert es)
 
