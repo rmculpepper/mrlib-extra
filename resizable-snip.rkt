@@ -12,10 +12,6 @@
 (define resize-nw-cursor (make-object cursor% 'size-nw/se))
 (define resize-ne-cursor (make-object cursor% 'size-ne/sw))
 
-;; A DragState is (list DragSym Real Real)
-;; A DragSym is one of 'w, 'h, 'wh
-;; where 'w means adjust width only, etc
-
 (define drag-state%
   (class object%
     (init-field type x1 y1 x2 y2)
@@ -52,6 +48,7 @@
       ;; (let ([minx (max (- minx 2) 0)] [miny (max (- miny 2) 0)]
       ;;       [maxx (+ maxx 2)] [maxy (+ maxy 2)])
       ;;   (send editor invalidate-bitmap-cache minx miny maxx maxy))
+      ;; FIXME: This works, but might be too costly
       (send editor invalidate-bitmap-cache 0 0 'display-end 'display-end))
 
     (define/public (get-cursor)
@@ -66,7 +63,7 @@
 ;; resizable-editor-snip%
 (define resizable-editor-snip%
   (class* editor-snip% ()
-    (init-field [drag-handles '(s e se)])
+    (init-field [resize-handles '(s e se)])
     (inherit get-extent get-editor get-margin get-admin
              resize get-flags set-flags)
     (super-new)
@@ -90,7 +87,7 @@
       (define-values (x2 y2) (get-lower-right-position dc x y))
       (cond [dragging (send dragging get-cursor)]
             [else
-             (case (get-edge/corner x y x2 y2 mx my)
+             (case (resize:get-edge/corner x y x2 y2 mx my)
                [(nw se) resize-nw-cursor]
                [(ne sw) resize-ne-cursor]
                [(n s) resize-n-cursor]
@@ -109,7 +106,7 @@
       (when (eq? event-type 'leave)
         (set! dragging #f))
       (cond [(eq? event-type 'left-down)
-             (cond [(get-edge/corner x y x2 y2 mx my)
+             (cond [(resize:get-edge/corner x y x2 y2 mx my)
                     => (lambda (where)
                          (define d
                            (new drag-state% (type where) (x1 x) (y1 y) (x2 x2) (y2 y2)))
@@ -136,12 +133,12 @@
         (eprintf "editor is not completely displayed\n"))
       (send dragging refresh (get-owner-editor)))
 
-    (define/public (get-edge/corner x1 y1 x2 y2 mx my)
+    (define/public (resize:get-edge/corner x1 y1 x2 y2 mx my)
       (for/first ([where (in-list (get-edge/corner* x1 y1 x2 y2 mx my))]
-                  #:when (memq where drag-handles))
+                  #:when (memq where resize-handles))
         where))
 
-    (define/public (get-edge/corner* x1 y1 x2 y2 mx my)
+    (define/private (get-edge/corner* x1 y1 x2 y2 mx my)
       (define on-e? (<= (max x1 (- x2 TARGET-W)) mx x2))
       (define on-s? (<= (max y1 (- y2 TARGET-H)) my y2))
       (define on-w? (<= x1 mx (min (+ x1 TARGET-W) x2)))
@@ -152,7 +149,7 @@
             [on-s? '(s)]
             [else '()]))
 
-    (define/public (editor-is-completely-displayed? w h)
+    (define/private (editor-is-completely-displayed? w h)
       (define editor (get-editor))
       (define last-pos (send editor last-position))
       (define xb (box 0))
@@ -161,7 +158,7 @@
       (define complete? (and (<= (unbox xb) w) (<= (unbox yb) h)))
       complete?)
 
-    (define/public (get-margin*)
+    (define/private (get-margin*)
       (define lb (box 0)) (define tb (box 0)) (define rb (box 0)) (define bb (box 0))
       (get-margin lb tb rb bb)
       (values (unbox lb) (unbox tb) (unbox rb) (unbox bb)))
@@ -192,76 +189,6 @@
                  (send this get-max-width) (send this get-max-height))))
     ))
 
-;; ;; clicky-snip%
-;; (define clicky-snip%
-;;   (class* editor-snip% ()
-;;     (init-field [open-style '(border)]
-;;                 [closed-style '(tight-text-fit)])
-;;     (inherit set-margin
-;;              set-inset
-;;              set-snipclass
-;;              set-tight-text-fit
-;;              show-border
-;;              get-admin)
-;;     (define -outer (new text%))
-;;     (super-new (editor -outer) (with-border? #f))
-;;     (set-margin 2 2 2 2)
-;;     (set-inset 2 2 2 2)
-;;     ;;(set-margin 3 0 0 0)
-;;     ;;(set-inset 1 0 0 0)
-;;     ;;(set-margin 0 0 0 0)
-;;     ;;(set-inset 0 0 0 0)
-;;     (define/public (closed-contents) null)
-;;     (define/public (open-contents) null)
-;;     (define open? #f)
-;;     (define/public (refresh-contents)
-;;       (with-unlock -outer
-;;         (send -outer erase)
-;;         (do-style (if open? open-style closed-style))
-;;         (outer:insert (if open? (hide-icon) (show-icon))
-;;                       style:hyper
-;;                       (if open?
-;;                           (lambda _
-;;                             (set! open? #f)
-;;                             (refresh-contents))
-;;                           (lambda _
-;;                             (set! open? #t)
-;;                             (refresh-contents))))
-;;         (for-each (lambda (s) (outer:insert s))
-;;                   (if open? (open-contents) (closed-contents)))
-;;         (send -outer change-style top-aligned 0 (send -outer last-position))))
-;;     (define/private (do-style style)
-;;       (show-border (memq 'border style))
-;;       (set-tight-text-fit (memq 'tight-text-fit style)))
-;;     (define/private outer:insert
-;;       (case-lambda
-;;        [(obj)
-;;         (if (styled? obj)
-;;             (outer:insert (styled-contents obj)
-;;                           (styled-style obj)
-;;                           (styled-clickback obj))
-;;             (outer:insert obj style:normal))]
-;;        [(text style)
-;;         (outer:insert text style #f)]
-;;        [(text style clickback)
-;;         (let ([start (send -outer last-position)])
-;;           (send -outer insert text)
-;;           (let ([end (send -outer last-position)])
-;;             (send -outer change-style style start end #f)
-;;             (when clickback
-;;                   (send -outer set-clickback start end clickback))))]))
-;;     (send -outer hide-caret #t)
-;;     (send -outer lock #t)
-;;     (refresh-contents)
-;;     ))
-
-(define (show-icon)
-  (make-object image-snip%
-    (collection-file-path "turn-up.png" "icons")))
-(define (hide-icon)
-  (make-object image-snip%
-    (collection-file-path "turn-down.png" "icons")))
-
 (define (call/save-dc-state dc proc)
   (define saved-region (send dc get-clipping-region))
   (define saved-brush (send dc get-brush))
@@ -271,41 +198,24 @@
     (send dc set-brush saved-brush)
     (send dc set-pen saved-pen)))
 
-(define-syntax-rule (style-delta [command arg ...] ...)
-  (let ([sd (make-object style-delta%)])
-    (cond [(eq? 'command 'color)
-           (send sd set-delta-foreground (car (list arg ...)))]
-          [else
-           (send sd set-delta 'command arg ...)])
-    ...
-    sd))
-
-(define rule-sd (style-delta [change-bold] [color "blue"]))
-(define error-sd (style-delta [change-italic] [color "red"]))
-(define code-sd (style-delta [change-family 'modern]))
-(define meta-code-sd (style-delta [change-family 'modern] [change-italic]))
-(define meta-sd (style-delta [change-family 'modern] [color "blue"]
-                             [change-bold] [change-bigger 2]))
-(define hrule-sd (style-delta [change-size 4]))
-
-
 ;; ============================================================
 
-(define f (new frame% (label "test") (height 400) (width 600)))
-(define t (new text%))
-(define ec (new editor-canvas% (editor t) (parent f)))
-(send f show #t)
+(module+ main
+  (provide (all-defined-out))
+  (define f (new frame% (label "test") (height 400) (width 600)))
+  (define t (new text%))
+  (define ec (new editor-canvas% (editor t) (parent f)))
+  (send f show #t)
 
-(send t insert "Here's what's I'm talking about:\n")
+  (send t insert "Here's what's I'm talking about:\n")
 
-(define t2 (new text%))
-(define es (new resizable-editor-snip% (editor t2)))
-(send t2 insert "abcdefg hijklmno pqrstuv wxyz")
-(send t insert es)
+  (define t2 (new text%))
+  (define es (new resizable-editor-snip% (editor t2)))
+  (send t2 insert "abcdefg hijklmno pqrstuv wxyz")
+  (send t insert es)
 
-(send t2 hide-caret #t)
-(send t2 lock #t)
+  (send t2 hide-caret #t)
+  (send t2 lock #t)
 
-(send t hide-caret #t)
-(send t lock #t)
-
+  (send t hide-caret #t)
+  (send t lock #t))
