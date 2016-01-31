@@ -12,19 +12,18 @@
   (class editor-snip%
     (inherit get-editor
              get-admin)
-    (init-field [open-callback void]
-                [closed-callback void])
+    (init-field [open/close-callback void])
     (super-new)
 
     (let ([outer-t (get-editor)])
-      (send outer-t insert
-            (new turn-snip%
-                 [state 'up]
-                 [on-up (λ () (closed-callback))]
-                 [on-down (λ () (open-callback))]))
-      (send outer-t change-style top-aligned 0 (send t last-position))
-      (send outer-t hide-caret #t)
-      (send outer-t lock #t))
+      (send* outer-t
+        [insert (new turn-snip%
+                     [state 'up]
+                     [on-up (λ () (open/close-callback #f))]
+                     [on-down (λ () (open/close-callback #t))])]
+        [change-style top-aligned 0 (send outer-t last-position)]
+        [hide-caret #t]
+        [lock #t]))
     ))
 
 ;; expandable-snip%
@@ -34,8 +33,7 @@
              get-admin)
     (init [closed-editor (new text%)]
           [open-editor (new text%)]
-          [closed-callback void]
-          [open-callback void])
+          [open/close-callback void])
     (init-field [layout 'replace]) ;; (U 'replace 'append)
 
     (field [open? #f])
@@ -48,10 +46,12 @@
     (send closed-es set-margin 0 0 0 0)
     (send closed-es set-inset 0 0 0 0)
 
-    (super-new [open-callback
-                (lambda () (unless open? (set! open? #t) (refresh-contents) (open-callback)))]
-               [closed-callback
-                (lambda () (when open? (set! open? #f) (refresh-contents) (closed-callback)))])
+    (super-new [open/close-callback
+                (lambda (now-open?)
+                  (unless (eq? now-open? open?)
+                    (set! open? now-open?)
+                    (refresh-contents)
+                    (open/close-callback this now-open?)))])
 
     (define/public (get-open-editor) (send open-es get-editor))
     (define/public (get-closed-editor) (send closed-es get-editor))
@@ -73,7 +73,6 @@
     (define/private (refresh-contents)
       (define outer-t (get-editor))
       (with-unlock outer-t
-        (send outer-t begin-edit-sequence)
         (send outer-t release-snip closed-es)
         (send outer-t release-snip open-es)
         (send outer-t delete 1 (send outer-t last-position))
@@ -82,8 +81,7 @@
         (when (and open? (eq? layout 'append))
           (send outer-t insert "\n" (send outer-t last-position)))
         (when open?
-          (send outer-t insert open-es (send outer-t last-position)))
-        (send outer-t end-edit-sequence)))
+          (send outer-t insert open-es (send outer-t last-position)))))
 
     (refresh-contents)
     ))
