@@ -5,6 +5,10 @@
 (provide resizable-editor-snip-mixin
          resizable-editor-snip%)
 
+;; TODO:
+;; - when resizing horizontally, don't set {min,max}-height, leave unconstrained
+;;   (requires duplicating much of resize method)
+
 (define TARGET-W 4)
 (define TARGET-H 4)
 
