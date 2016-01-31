@@ -45,12 +45,9 @@
             (send dc draw-rectangle x1 y1 w h)))))
 
     (define/public (refresh editor)
-      ;; This doesn't quite work: leaves artifacts along edges
-      ;; (let ([minx (max (- minx 2) 0)] [miny (max (- miny 2) 0)]
-      ;;       [maxx (+ maxx 2)] [maxy (+ maxy 2)])
-      ;;   (send editor invalidate-bitmap-cache minx miny maxx maxy))
-      ;; FIXME: This works, but might be too costly
-      (send editor invalidate-bitmap-cache 0 0 'display-end 'display-end))
+      (define-values (minx* miny*) (send editor dc-location-to-editor-location minx miny))
+      (define-values (maxx* maxy*) (send editor dc-location-to-editor-location maxx maxy))
+      (send editor invalidate-bitmap-cache minx* miny* maxx* maxy*))
 
     (define/public (get-cursor)
       (case type
@@ -148,6 +145,11 @@
     (define/private (do-resize dragging type x1 y1 x2 y2)
       (define w (- x2 x1))
       (define h (- y2 y1))
+      ;; Without the edit-sequence, sometimes get a glitchy draw (wrong y)
+      ;; during resize > text:set-max-width > ... > draw.
+      ;; I conjecture that the mline height cache gets out of sync.
+      (define editor (get-editor))
+      (send editor begin-edit-sequence)
       (case type
         [(e w)
          (resize-w w)]
@@ -155,10 +157,10 @@
          (resize w h)
          ;; Re-adjust the editor's width because resize doesn't un-off-by-1
          (define-values (lm tm rm bm) (get-margin*))
-         (send* (get-editor)
+         (send* editor
            [set-min-width (- w lm rm -1)]
            [set-max-width (- w lm rm -1)])])
-      (send dragging refresh (get-owner-editor)))
+      (send editor end-edit-sequence))
 
     (define/private (resize-w w)
       (define editor (get-editor))
