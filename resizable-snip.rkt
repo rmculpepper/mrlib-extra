@@ -65,7 +65,8 @@
 (define (resizable-editor-snip-mixin %)
   (class %
     (init-field [resize-handles '(s e se)]
-                [resize-box-color (get-highlight-background-color)])
+                [resize-box-color (get-highlight-background-color)]
+                [resize-indicate-incomplete-view? #t])
     (inherit get-extent get-editor get-margin get-inset get-admin
              resize get-flags set-flags)
     (super-new)
@@ -76,7 +77,8 @@
 
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (super draw dc x y left top right bottom dx dy draw-caret)
-      (indicate-editor-completely-displayed dc x y)
+      (when resize-indicate-incomplete-view?
+        (indicate-editor-completely-displayed dc x y))
       (when dragging (send dragging draw-box dc resize-box-color)))
 
     (define/private (indicate-editor-completely-displayed dc x y)
@@ -231,7 +233,7 @@
   (send t insert "Here's what's I'm talking about:\n")
 
   (define t2 (new text%))
-  (define es (new resizable-editor-snip% (editor t2)))
+  (define es (new resizable-editor-snip% (editor t2) (with-border? #t)))
   (send t2 insert "abcdefg hijklmno pqrstuv wxyz")
   (send t insert es)
 
