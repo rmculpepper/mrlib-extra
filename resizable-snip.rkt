@@ -5,10 +5,6 @@
 (provide resizable-editor-snip-mixin
          resizable-editor-snip%)
 
-;; TODO:
-;; - when resizing horizontally, don't set {min,max}-height, leave unconstrained
-;;   (requires duplicating much of resize method)
-
 (define TARGET-W 4)
 (define TARGET-H 4)
 
@@ -27,7 +23,7 @@
     (super-new)
 
     (define/public (call proc)
-      (proc x1 y1 x2 y2))
+      (proc type x1 y1 x2 y2))
 
     (define/public (update mx my)
       (case type
@@ -72,7 +68,7 @@
                 [resize-box-color (get-highlight-background-color)]
                 [resize-indicate-incomplete-view? #t])
     (inherit get-extent get-editor get-margin get-inset get-admin
-             resize get-flags set-flags)
+             resize get-flags set-flags set-min-width set-max-width)
     (super-new)
     (set-flags (append '(handles-events handles-all-mouse-events) (get-flags)))
 
@@ -146,19 +142,35 @@
             [(and dragging (eq? event-type 'left-up))
              (let ([d dragging])
                (set! dragging #f)
-               (send d call (lambda (x1 y1 x2 y2) (do-resize d x1 y1 x2 y2))))]
+               (send d call (lambda (type x1 y1 x2 y2) (do-resize d type x1 y1 x2 y2))))]
             [else (call-super)]))
 
-    (define/private (do-resize dragging x1 y1 x2 y2)
+    (define/private (do-resize dragging type x1 y1 x2 y2)
       (define w (- x2 x1))
       (define h (- y2 y1))
-      (resize w h)
-      ;; Re-adjust the editor's width because resize doesn't un-off-by-1
-      (define-values (lm tm rm bm) (get-margin*))
-      (send* (get-editor)
-        [set-min-width (- w lm rm -1)]
-        [set-max-width (- w lm rm -1)])
+      (case type
+        [(e w)
+         (resize-w w)]
+        [else
+         (resize w h)
+         ;; Re-adjust the editor's width because resize doesn't un-off-by-1
+         (define-values (lm tm rm bm) (get-margin*))
+         (send* (get-editor)
+           [set-min-width (- w lm rm -1)]
+           [set-max-width (- w lm rm -1)])])
       (send dragging refresh (get-owner-editor)))
+
+    (define/private (resize-w w)
+      (define editor (get-editor))
+      (define s-admin (get-admin))
+      (define-values (lm tm rm bm) (get-margin*))
+      (let ([w (max 0.0 (- w (+ lm rm)))])
+        (set-min-width w)
+        (set-max-width w)
+        (when editor  ;; unadjust (see snip get-extent)
+          (send editor set-max-width (+ w 1))
+          (send editor set-min-width (+ w 1)))
+        (when s-admin (send s-admin resized this #t))))
 
     (define/public (resize:get-edge/corner x1 y1 x2 y2 mx my)
       (for/first ([where (in-list (get-edge/corner* x1 y1 x2 y2 mx my))]
