@@ -5,8 +5,7 @@
 (provide resizable-editor-snip-mixin
          resizable-editor-snip%)
 
-(define TARGET-W 4)
-(define TARGET-H 4)
+(define DRAG-BORDER-WIDTH 6)
 
 (define resize-n-cursor (make-object cursor% 'size-n/s))
 (define resize-e-cursor (make-object cursor% 'size-e/w))
@@ -62,6 +61,7 @@
 (define (resizable-editor-snip-mixin %)
   (class %
     (init-field [resize-handles '(s e se)]
+                [drag-border-width DRAG-BORDER-WIDTH]
                 [resize-box-color (get-highlight-background-color)]
                 [resize-indicate-incomplete-view? #t])
     (inherit get-extent get-editor get-margin get-inset get-admin
@@ -180,10 +180,10 @@
         where))
 
     (define/private (get-edge/corner* x1 y1 x2 y2 mx my)
-      (define on-e? (<= (max x1 (- x2 TARGET-W)) mx x2))
-      (define on-s? (<= (max y1 (- y2 TARGET-H)) my y2))
-      (define on-w? (<= x1 mx (min (+ x1 TARGET-W) x2)))
-      (define on-n? (<= y1 my (min (+ y1 TARGET-H) y2)))
+      (define on-e? (<= (max x1 (- x2 drag-border-width)) mx x2))
+      (define on-s? (<= (max y1 (- y2 drag-border-width)) my y2))
+      (define on-w? (<= x1 mx (min (+ x1 drag-border-width) x2)))
+      (define on-n? (<= y1 my (min (+ y1 drag-border-width) y2)))
       (cond [on-e? (cond [on-s? '(se s e)] [on-n? '(ne n e)] [else '(e)])]
             [on-w? (cond [on-s? '(sw s w)] [on-n? '(nw n w)] [else '(w)])]
             [on-n? '(n)]
