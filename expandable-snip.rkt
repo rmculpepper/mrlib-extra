@@ -181,24 +181,6 @@
       (define t (get-editor))
       (send t change-style top-aligned 0 (send t last-position)))
 
-    #|
-    (define/public (refresh-contents)
-      (define t (get-editor))
-      (with-unlock t
-        (send t erase)
-        (restyle-snip (if open? open-style closed-style))
-        (text:insert t (if open? (hide-icon) (show-icon))
-                     #:style style:hyper
-                     #:clickback (lambda _ (set! open? (not open?)) (refresh-contents)))
-        (update-callback (get-editor) open?)
-        (when #f
-          (send t change-style top-aligned 0 (send t last-position)))))
-
-    (define/private (restyle-snip style)
-      (show-border (memq 'border style))
-      (set-tight-text-fit (memq 'tight-text-fit style))
-      (set-align-top-line (memq 'align-top-line style)))
-    |#
     (show-closed-contents #t)
     ))
 
