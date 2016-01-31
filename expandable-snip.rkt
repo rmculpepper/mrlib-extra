@@ -16,8 +16,6 @@
                 [closed-callback void])
     (super-new)
 
-    (field [open? #f])
-
     (let ([outer-t (get-editor)])
       (send outer-t insert
             (new turn-snip%
@@ -29,16 +27,18 @@
       (send outer-t lock #t))
     ))
 
-;; clicky-snip%
-(define clicky-snip%
+;; expandable-snip%
+(define expandable-snip%
   (class two-state-snip%
     (inherit get-editor
              get-admin)
-    (inherit-field open?)
-    (init [open-editor (new text%)]
-          [closed-editor (new text%)]
-          [open-callback void]
-          [closed-callback void])
+    (init [closed-editor (new text%)]
+          [open-editor (new text%)]
+          [closed-callback void]
+          [open-callback void])
+    (init-field [layout 'replace]) ;; (U 'replace 'append)
+
+    (field [open? #f])
 
     (field [open-es (new editor-snip% (editor open-editor) (with-border? #f))])
     (send open-es set-margin 0 0 0 0)
@@ -49,41 +49,43 @@
     (send closed-es set-inset 0 0 0 0)
 
     (super-new [open-callback
-                (lambda () (and (show-open-contents) (open-callback)))]
+                (lambda () (unless open? (set! open? #t) (refresh-contents) (open-callback)))]
                [closed-callback
-                (lambda () (and (show-closed-contents) (closed-callback)))])
+                (lambda () (when open? (set! open? #f) (refresh-contents) (closed-callback)))])
 
     (define/public (get-open-editor) (send open-es get-editor))
     (define/public (get-closed-editor) (send closed-es get-editor))
 
     (define (get-open-state) open?)
-    (define (set-open-state v) (if v (show-open-contents) (show-closed-contents)))
+    (define (set-open-state v)
+      (let ([v (and v #t)])
+        (unless (eq? open? v)
+          (set! open? v)
+          (refresh-contents))))
 
-    ;; The editor contents are 0[turn-snip]1[open/closed-editor-snip]2.
+    ;; if layout is 'replace, editor contains
+    ;;  - open? = #f : [turn-snip][closed-es]
+    ;;  - open? = #t : [turn-snip][open-es]
+    ;; if layout is 'append, editor contains
+    ;;  - open? = #f : [turn-snip][closed-es]
+    ;;  - open? = #t : [turn-snip][closed-es]\n[open-es]
 
-    (define/private (show-closed-contents [force? #f])
+    (define/private (refresh-contents)
       (define outer-t (get-editor))
-      (cond [(or open? force?)
-             (set! open? #f)
-             (with-unlock outer-t
-               (send outer-t release-snip open-es)
-               (send outer-t delete 1 2 #f)
-               (send outer-t insert closed-es 1))
-             #t]
-            [else #f]))
+      (with-unlock outer-t
+        (send outer-t begin-edit-sequence)
+        (send outer-t release-snip closed-es)
+        (send outer-t release-snip open-es)
+        (send outer-t delete 1 (send outer-t last-position))
+        (when (or (not open?) (eq? layout 'append))
+          (send outer-t insert closed-es (send outer-t last-position)))
+        (when (and open? (eq? layout 'append))
+          (send outer-t insert "\n" (send outer-t last-position)))
+        (when open?
+          (send outer-t insert open-es (send outer-t last-position)))
+        (send outer-t end-edit-sequence)))
 
-    (define/private (show-open-contents)
-      (define outer-t (get-editor))
-      (cond [(not open?)
-             (set! open? #t)
-             (with-unlock outer-t
-               (send outer-t release-snip closed-es)
-               (send outer-t delete 1 2 #f)
-               (send outer-t insert open-es 1))
-             #t]
-            [else #f]))
-
-    (show-closed-contents #t)
+    (refresh-contents)
     ))
 
 (define top-aligned (style-delta [change-alignment 'top]))
@@ -97,11 +99,18 @@
 
 (send t insert "Here's what's I'm talking about,\na nice clicky snip: ")
 
-(define es (new clicky-snip% (with-border? #f)))
-(send es set-margin 0 0 0 0)
+(define es (new expandable-snip% (with-border? #t) (layout 'replace)))
+;(send es set-margin 0 0 0 0)
 
-(send (send es get-closed-editor) insert "alphabet")
-(send (send es get-open-editor) insert "abcdefg\nhijklmno\npqrstuv\nwxyz")
+(send* (send es get-closed-editor)
+  [insert "alphabet"]
+  ;; [hide-caret #t]
+  [lock #t])
+
+(send* (send es get-open-editor)
+  [insert "abcdefg\nhijklmno\npqrstuv\nwxyz"]
+  ;; [hide-caret #t]
+  [lock #t])
 
 (send t insert es)
 (send t hide-caret #t)
