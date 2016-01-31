@@ -92,18 +92,17 @@
                    (if (real? editor-min-height) (<= editor-min-height h) #t)
                    (<= (unbox xb) w)
                    (<= (unbox yb) h))
-        (define MORE "…")
-        (define-values (tw th tdesc tasc) (send dc get-text-extent MORE))
+        ;; Draw ellipsis right inside of border/inset
         (define-values (li ti ri bi) (get-inset*))
-        ;; Want baseline to be 2 pixels above border
-        ;; ie, want ydraw + (th - tdesc) + 2 = (y2 - bottominset)
-        ;;       so ydraw = y2 - bottominset - th + tdesc - 2
-        (define ydraw (- y2 bi (- th tdesc) 3))
-        (define xdraw (- x2 tw ri 3))
-        (define saved-text-color (send dc get-text-foreground))
-        (send dc set-text-foreground "gray")
-        (send dc draw-text MORE xdraw ydraw)
-        (send dc set-text-foreground saved-text-color)))
+        (begin (define ex (- x2 ri 5)) (define ey (- y2 bi 5)))
+        (call/save-dc-state dc
+         (lambda ()
+           (send* dc
+             [set-pen "gray" 1 'solid]
+             [set-brush "gray" 'solid]
+             [draw-ellipse (- ex 0) ey 2 3]
+             [draw-ellipse (- ex 4) ey 2 3]
+             [draw-ellipse (- ex 8) ey 2 3])))))
 
     (define/override (adjust-cursor dc x y edx edy event)
       (define (call-super) (super adjust-cursor dc x y edx edy event))
