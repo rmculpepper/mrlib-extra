@@ -2,7 +2,8 @@
 (require racket/class
          racket/match
          racket/gui/base)
-(provide (all-defined-out))
+(provide resizable-editor-snip-mixin
+         resizable-editor-snip%)
 
 (define TARGET-W 4)
 (define TARGET-H 4)
@@ -60,9 +61,9 @@
         [else (error 'get-cursor "bad type: ~e" type)]))
     ))
 
-;; resizable-editor-snip%
-(define resizable-editor-snip%
-  (class* editor-snip% ()
+;; resizable-editor-snip-mixin
+(define (resizable-editor-snip-mixin %)
+  (class %
     (init-field [resize-handles '(s e se)])
     (inherit get-extent get-editor get-margin get-admin
              resize get-flags set-flags)
@@ -188,6 +189,10 @@
                  (send this get-min-width) (send this get-min-height)
                  (send this get-max-width) (send this get-max-height))))
     ))
+
+;; resizable-editor-snip%
+(define resizable-editor-snip%
+  (resizable-editor-snip-mixin editor-snip%))
 
 (define (call/save-dc-state dc proc)
   (define saved-region (send dc get-clipping-region))

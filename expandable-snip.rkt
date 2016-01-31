@@ -97,7 +97,10 @@
 
 (send t insert "Here's what's I'm talking about,\na nice clicky snip: ")
 
-(define es (new expandable-snip% (with-border? #t) (layout 'replace)))
+(require "resizable-snip.rkt")
+(define clicky-snip% (resizable-editor-snip-mixin expandable-snip%))
+
+(define es (new clicky-snip% (with-border? #t) (layout 'replace)))
 ;(send es set-margin 0 0 0 0)
 
 (send* (send es get-closed-editor)
