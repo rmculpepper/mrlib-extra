@@ -1,8 +1,6 @@
 #lang racket/base
 (require racket/class
-         racket/match
          racket/gui/base
-         mrlib/include-bitmap
          "util.rkt"
          "private/turn-snip.rkt")
 (provide (all-defined-out))
