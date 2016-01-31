@@ -66,7 +66,7 @@
   (class %
     (init-field [resize-handles '(s e se)]
                 [resize-box-color (get-highlight-background-color)])
-    (inherit get-extent get-editor get-margin get-admin
+    (inherit get-extent get-editor get-margin get-inset get-admin
              resize get-flags set-flags)
     (super-new)
     (set-flags (append '(handles-events handles-all-mouse-events) (get-flags)))
@@ -76,7 +76,34 @@
 
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (super draw dc x y left top right bottom dx dy draw-caret)
+      (indicate-editor-completely-displayed dc x y)
       (when dragging (send dragging draw-box dc resize-box-color)))
+
+    (define/private (indicate-editor-completely-displayed dc x y)
+      (define-values (x2 y2) (get-lower-right-position dc x y))
+      (begin (define w (- x2 x)) (define h (- y2 y)))
+      (define editor (get-editor))
+      (define editor-min-width (send editor get-min-width))
+      (define editor-min-height (send editor get-min-height))
+      (define last-pos (send editor last-position))
+      (begin (define xb (box 0)) (define yb (box 0)))
+      (send editor position-location last-pos xb yb #f)
+      (unless (and (if (real? editor-min-width) (<= editor-min-width w) #t)
+                   (if (real? editor-min-height) (<= editor-min-height h) #t)
+                   (<= (unbox xb) w)
+                   (<= (unbox yb) h))
+        (define MORE "…")
+        (define-values (tw th tdesc tasc) (send dc get-text-extent MORE))
+        (define-values (li ti ri bi) (get-inset*))
+        ;; Want baseline to be 2 pixels above border
+        ;; ie, want ydraw + (th - tdesc) + 2 = (y2 - bottominset)
+        ;;       so ydraw = y2 - bottominset - th + tdesc - 2
+        (define ydraw (- y2 bi (- th tdesc) 3))
+        (define xdraw (- x2 tw ri 3))
+        (define saved-text-color (send dc get-text-foreground))
+        (send dc set-text-foreground "gray")
+        (send dc draw-text MORE xdraw ydraw)
+        (send dc set-text-foreground saved-text-color)))
 
     (define/override (adjust-cursor dc x y edx edy event)
       (define (call-super) (super adjust-cursor dc x y edx edy event))
@@ -126,9 +153,6 @@
       (send* (get-editor)
         [set-min-width (- w lm rm -1)]
         [set-max-width (- w lm rm -1)])
-      ;; FIXME: indicate whether editor is completely displayed
-      (unless (editor-is-completely-displayed? (- w lm rm -1) (- h tm bm))
-        (eprintf "editor is not completely displayed\n"))
       (send dragging refresh (get-owner-editor)))
 
     (define/public (resize:get-edge/corner x1 y1 x2 y2 mx my)
@@ -147,18 +171,14 @@
             [on-s? '(s)]
             [else '()]))
 
-    (define/private (editor-is-completely-displayed? w h)
-      (define editor (get-editor))
-      (define last-pos (send editor last-position))
-      (define xb (box 0))
-      (define yb (box 0))
-      (send editor position-location last-pos xb yb #f)
-      (define complete? (and (<= (unbox xb) w) (<= (unbox yb) h)))
-      complete?)
-
     (define/private (get-margin*)
       (define lb (box 0)) (define tb (box 0)) (define rb (box 0)) (define bb (box 0))
       (get-margin lb tb rb bb)
+      (values (unbox lb) (unbox tb) (unbox rb) (unbox bb)))
+
+    (define/private (get-inset*)
+      (define lb (box 0)) (define tb (box 0)) (define rb (box 0)) (define bb (box 0))
+      (get-inset lb tb rb bb)
       (values (unbox lb) (unbox tb) (unbox rb) (unbox bb)))
 
     (define/private (get-owner-editor)
