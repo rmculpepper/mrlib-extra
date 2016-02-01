@@ -122,7 +122,6 @@
       (define (call-super) (super on-event dc x y edx edy event))
       (define-values (mx my) (values (send event get-x) (send event get-y)))
       (define-values (x2 y2) (get-lower-right-position dc x y))
-      (when #f (debug-mouse-event dc x y edx edy event))
       (define event-type (send event get-event-type))
       (when (and dragging (eq? event-type 'motion))
         (send dragging update mx my)
@@ -210,21 +209,6 @@
       (define hb (box 0))
       (get-extent dc x y wb hb)
       (values (+ x (unbox wb)) (+ y (unbox hb))))
-
-    (define/private (debug-mouse-event dc x y edx edy event)
-      (unless (eq? (send event get-event-type) 'motion)
-        (define mx (send event get-x))
-        (define my (send event get-y))
-        (define-values (x2 y2) (get-lower-right-position dc x y))
-        (eprintf "event; ed: ~s,~s type: ~s ~a\n" edx edy
-                 (send event get-event-type)
-                 (if (send event dragging?) "dragging" ""))
-        (eprintf "  mouse at ~s,~s\n" mx my)
-        (eprintf "  snip top-left ~s,~s bottom-right ~s,~s\n"
-                 x y x2 y2)
-        (eprintf "  size min ~s,~s max ~s,~s\n"
-                 (send this get-min-width) (send this get-min-height)
-                 (send this get-max-width) (send this get-max-height))))
     ))
 
 ;; resizable-editor-snip%
