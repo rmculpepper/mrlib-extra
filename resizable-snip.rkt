@@ -14,7 +14,7 @@
 
 (define drag-state%
   (class object%
-    (init-field type x1 y1 x2 y2)
+    (init-field type min? x1 y1 x2 y2)
     (define minx x1)
     (define miny y1)
     (define maxx x2)
@@ -22,7 +22,7 @@
     (super-new)
 
     (define/public (call proc)
-      (proc type x1 y1 x2 y2))
+      (proc type min? x1 y1 x2 y2))
 
     (define/public (update mx my)
       (case type
@@ -40,7 +40,7 @@
           (lambda ()
             (send dc set-clipping-region #f)
             (send dc set-brush "black" 'transparent)
-            (send dc set-pen color 1 'dot)
+            (send dc set-pen color 1 (if min? 'long-dash 'dot))
             (send dc draw-rectangle x1 y1 w h)))))
 
     (define/public (refresh editor)
@@ -65,7 +65,8 @@
                 [resize-box-color (get-highlight-background-color)]
                 [resize-indicate-incomplete-view? #t])
     (inherit get-extent get-editor get-margin get-inset get-admin
-             resize get-flags set-flags set-min-width set-max-width)
+             resize get-flags set-flags
+             set-min-width set-max-width set-min-height set-max-height)
     (super-new)
     (set-flags (append '(handles-events handles-all-mouse-events) (get-flags)))
 
@@ -132,17 +133,19 @@
              (cond [(resize:get-edge/corner x y x2 y2 mx my)
                     => (lambda (where)
                          (define d
-                           (new drag-state% (type where) (x1 x) (y1 y) (x2 x2) (y2 y2)))
+                           (new drag-state% (type where) (min? (not (send event get-shift-down)))
+                                (x1 x) (y1 y) (x2 x2) (y2 y2)))
                          (send d update mx my)
                          (set! dragging d))]
                    [else (call-super)])]
             [(and dragging (eq? event-type 'left-up))
              (let ([d dragging])
                (set! dragging #f)
-               (send d call (lambda (type x1 y1 x2 y2) (do-resize d type x1 y1 x2 y2))))]
+               (send d call (lambda (type min? x1 y1 x2 y2) (do-resize d type min? x1 y1 x2 y2)))
+               (send d refresh (get-owner-editor)))]
             [else (call-super)]))
 
-    (define/private (do-resize dragging type x1 y1 x2 y2)
+    (define/private (do-resize dragging type min? x1 y1 x2 y2)
       (define w (- x2 x1))
       (define h (- y2 y1))
       ;; Without the edit-sequence, sometimes get a glitchy draw (wrong y)
@@ -150,29 +153,27 @@
       ;; I conjecture that the mline height cache gets out of sync.
       (define editor (get-editor))
       (send editor begin-edit-sequence)
-      (case type
-        [(e w)
-         (resize-w w)]
-        [else
-         (resize w h)
-         ;; Re-adjust the editor's width because resize doesn't un-off-by-1
-         (define-values (lm tm rm bm) (get-margin*))
-         (send* editor
-           [set-min-width (- w lm rm -1)]
-           [set-max-width (- w lm rm -1)])])
+      (let ([w (case type [(n s) #f] [else w])]
+            [h (case type [(e w) #f] [else h])])
+        (resize* w h min?))
       (send editor end-edit-sequence))
 
-    (define/private (resize-w w)
+    (define/private (resize* w h min?)
       (define editor (get-editor))
       (define s-admin (get-admin))
       (define-values (lm tm rm bm) (get-margin*))
-      (let ([w (max 0.0 (- w (+ lm rm)))])
-        (set-min-width w)
-        (set-max-width w)
-        (when editor  ;; unadjust (see snip get-extent)
-          (send editor set-max-width (+ w 1))
-          (send editor set-min-width (+ w 1)))
-        (when s-admin (send s-admin resized this #t))))
+      (when w
+        (let ([w (max 0.0 (- w lm rm))])
+          (set-min-width (if min? w 'none))
+          (set-max-width w)
+          (when editor  ;; unadjust (see snip get-extent)
+            (send editor set-min-width (if min? (+ w 1) 'none))
+            (send editor set-max-width (+ w 1)))))
+      (when h
+        (let ([h (max 0.0 (- h tm bm))])
+          (set-min-height (if min? h 'none))
+          (set-max-height h)))
+      (when s-admin (send s-admin resized this #t)))
 
     (define/public (resize:get-edge/corner x1 y1 x2 y2 mx my)
       (for/first ([where (in-list (get-edge/corner* x1 y1 x2 y2 mx my))]
